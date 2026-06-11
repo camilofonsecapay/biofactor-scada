@@ -6,3 +6,6 @@ aiosqlite==0.20.0
 apscheduler==3.11.2
 python-dotenv==1.0.1
 httpx==0.28.1
+openai==1.59.6
+asyncpg==0.30.0
+qrcode[pil]==7.4.2

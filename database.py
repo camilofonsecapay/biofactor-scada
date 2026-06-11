@@ -1,11 +1,14 @@
 """
-BioFactor SCADA – Database layer
-SQLite (file-based, portable, zero-config) via SQLAlchemy async.
-Schema mirrors what a Postgres deployment would use – column types,
-constraints and query patterns are identical.
+BioFactor — Database layer (AI-native)
+Dual-mode: usa PostgreSQL (asyncpg) si DATABASE_URL está seteada,
+si no cae a SQLite (aiosqlite) — portable, zero-config para el demo.
+El schema es idéntico en ambos motores; los tipos JSON se persisten
+como Text (json.dumps) para máxima compatibilidad.
 """
 
-import asyncio
+import os
+import re
+import json
 import random
 import math
 from datetime import datetime, timedelta
@@ -17,10 +20,43 @@ from sqlalchemy import (
 )
 import enum
 
-DATABASE_URL = "sqlite+aiosqlite:///./biofactor.db"
+# ─── ENGINE (dual-mode) ────────────────────────────────────────────────────────
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+def _resolve_database_url() -> tuple[str, bool, dict]:
+    """Resuelve la URL de conexión. Devuelve (url, is_sqlite, connect_args)."""
+    raw = (os.getenv("DATABASE_URL") or "").strip()
+    if not raw:
+        # Ruta relativa al módulo (no al cwd) → robusto sin importar desde dónde se lance
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "biofactor.db")
+        return f"sqlite+aiosqlite:///{db_path}", True, {}
+
+    url = raw
+    # Render/Heroku inyectan postgres:// o postgresql:// — normalizar a asyncpg
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    connect_args: dict = {}
+    # asyncpg no entiende ?sslmode= en la URL (eso es libpq) — traducir a ssl
+    if "sslmode=" in url:
+        url = re.sub(r"[?&]sslmode=[^&]+", "", url)
+        connect_args["ssl"] = True
+    return url, False, connect_args
+
+
+DATABASE_URL, IS_SQLITE, _CONNECT_ARGS = _resolve_database_url()
+
+_engine_kwargs: dict = {"echo": False}
+if not IS_SQLITE:
+    _engine_kwargs.update(pool_size=10, max_overflow=20, pool_pre_ping=True)
+if _CONNECT_ARGS:
+    _engine_kwargs["connect_args"] = _CONNECT_ARGS
+
+engine = create_async_engine(DATABASE_URL, **_engine_kwargs)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+DB_BACKEND = "sqlite" if IS_SQLITE else "postgres"
 
 # ─── ENUMS ────────────────────────────────────────────────────────────────────
 
@@ -51,15 +87,41 @@ class WorkflowStatus(str, enum.Enum):
     COMPLETED = "completed"
     FAILED    = "failed"
 
+class DecisionOutcome(str, enum.Enum):
+    AUTO_EXECUTED    = "auto_executed"     # el dial permitió ejecución autónoma
+    PENDING_APPROVAL = "pending_approval"  # requiere humano
+    APPROVED         = "approved"
+    REJECTED         = "rejected"
+    OBSERVED         = "observed"          # solo observación, sin acción
+
+class ApprovalStatus(str, enum.Enum):
+    PENDING  = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED  = "expired"
+
 # ─── MODELS ──────────────────────────────────────────────────────────────────
 
 class Base(DeclarativeBase):
     pass
 
+class Planta(Base):
+    """Scaffold multi-tenant: una planta de bioconversión (base del modelo SaaS)."""
+    __tablename__ = "plantas"
+
+    id: Mapped[int]       = mapped_column(Integer, primary_key=True)
+    nombre: Mapped[str]   = mapped_column(String(128), nullable=False)
+    ciudad: Mapped[str]   = mapped_column(String(64), default="Montería")
+    pais: Mapped[str]     = mapped_column(String(32), default="Colombia")
+    slug: Mapped[str]     = mapped_column(String(32), unique=True, nullable=False)
+    activa: Mapped[bool]  = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
 class Lote(Base):
     __tablename__ = "lotes"
 
     id: Mapped[int]             = mapped_column(Integer, primary_key=True)
+    planta_id: Mapped[int]      = mapped_column(ForeignKey("plantas.id"), nullable=True)
     codigo: Mapped[str]         = mapped_column(String(32), unique=True, nullable=False)
     fecha_inicio: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     dia_actual: Mapped[int]     = mapped_column(Integer, default=1)
@@ -140,6 +202,71 @@ class ProduccionDiaria(Base):
     alertas_count: Mapped[int]   = mapped_column(Integer, default=0)
     rendimiento_pct: Mapped[float] = mapped_column(Float, default=0.0)
 
+# ─── MODELOS AGÉNTICOS (núcleo AI-native) ──────────────────────────────────────
+
+class AgentDecision(Base):
+    """Traza de razonamiento del kernel: percepción → razonamiento → acción.
+    Es el registro auditable que hace visible la autonomía del agente."""
+    __tablename__ = "agent_decisions"
+
+    id: Mapped[int]             = mapped_column(Integer, primary_key=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    cycle_id: Mapped[str]       = mapped_column(String(36), default="", index=True)
+    lote_codigo: Mapped[str]    = mapped_column(String(32), default="")
+    modulo: Mapped[str]         = mapped_column(String(16), default="")
+    role: Mapped[str]           = mapped_column(String(24), default="proceso")  # proceso|financiero|calidad|operaciones
+    severidad: Mapped[str]      = mapped_column(String(16), default=AlertSeverity.INFO)
+    titulo: Mapped[str]         = mapped_column(String(160), default="")
+    percepcion: Mapped[str]     = mapped_column(Text, default="")   # JSON: señales observadas
+    razonamiento: Mapped[str]   = mapped_column(Text, default="")   # texto: hipótesis/causa raíz
+    accion_propuesta: Mapped[str] = mapped_column(String(64), default="")  # workflow_key
+    outcome: Mapped[str]        = mapped_column(String(24), default=DecisionOutcome.OBSERVED)
+    confianza: Mapped[float]    = mapped_column(Float, default=0.0)  # 0..1
+    modelo: Mapped[str]         = mapped_column(String(32), default="deterministico")
+    tokens: Mapped[int]         = mapped_column(Integer, default=0)
+    latencia_ms: Mapped[int]    = mapped_column(Integer, default=0)
+    resultado: Mapped[str]      = mapped_column(Text, default="")   # JSON: outcome real (se llena luego)
+
+class Approval(Base):
+    """Cola de aprobación humana (human-in-the-loop). El agente propone
+    intervenciones críticas; el operador aprueba/rechaza."""
+    __tablename__ = "approvals"
+
+    id: Mapped[int]             = mapped_column(Integer, primary_key=True)
+    decision_id: Mapped[int]    = mapped_column(ForeignKey("agent_decisions.id"), nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    lote_codigo: Mapped[str]    = mapped_column(String(32), default="")
+    titulo: Mapped[str]         = mapped_column(String(160), default="")
+    rationale: Mapped[str]      = mapped_column(Text, default="")
+    workflow_key: Mapped[str]   = mapped_column(String(64), default="")
+    input_data: Mapped[str]     = mapped_column(Text, default="")   # JSON
+    severidad: Mapped[str]      = mapped_column(String(16), default=AlertSeverity.CRITICAL)
+    status: Mapped[str]         = mapped_column(String(16), default=ApprovalStatus.PENDING, index=True)
+    resolved_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    resolved_by: Mapped[str]    = mapped_column(String(64), default="")
+    nota_operador: Mapped[str]  = mapped_column(Text, default="")
+
+class AgentMemory(Base):
+    """Memoria / aprendizajes del agente. Cierra el loop: registra qué
+    intervenciones funcionaron y ajusta baselines por módulo."""
+    __tablename__ = "agent_memory"
+
+    id: Mapped[int]             = mapped_column(Integer, primary_key=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    scope: Mapped[str]          = mapped_column(String(32), default="global")  # global|MOD-01|lote:CODE
+    clave: Mapped[str]          = mapped_column(String(64), default="")
+    valor: Mapped[str]          = mapped_column(Text, default="")   # JSON o texto
+    nota: Mapped[str]           = mapped_column(Text, default="")
+
+class SystemConfig(Base):
+    """Configuración del sistema (key/value). Incluye el dial de autonomía."""
+    __tablename__ = "system_config"
+
+    id: Mapped[int]   = mapped_column(Integer, primary_key=True)
+    clave: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    valor: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 # ─── INIT + SEED ──────────────────────────────────────────────────────────────
 
 async def init_db():
@@ -155,6 +282,18 @@ async def seed_data():
             return
 
         now = datetime.utcnow()
+
+        # Planta default (multi-tenant scaffold)
+        planta = Planta(nombre="BioFactor Montería", ciudad="Montería",
+                        pais="Colombia", slug="monteria", activa=True)
+        session.add(planta)
+        await session.flush()
+
+        # Config inicial: dial de autonomía.
+        # autonomy_level: severidad MÁXIMA que el agente ejecuta solo.
+        #   "info" = nada auto (todo a aprobación) | "warning" = rutinas auto, críticas a aprobación | "critical" = todo auto
+        session.add(SystemConfig(clave="autonomy_level", valor="warning"))
+        session.add(SystemConfig(clave="llm_enabled", valor="auto"))  # auto = usa LLM si hay key
 
         # Create 3 lotes
         lotes_data = [
@@ -195,13 +334,13 @@ async def seed_data():
 
         lotes = []
         for ld in lotes_data:
-            lote = Lote(**ld)
+            lote = Lote(planta_id=planta.id, **ld)
             session.add(lote)
             lotes.append(lote)
 
         await session.flush()
 
-        # Seed sensor readings: last 8 days for lote A (2 readings/hour = 48/day = 384 total, we seed 200)
+        # Seed sensor readings
         random.seed(42)
         readings = []
         for lote in lotes:
@@ -295,5 +434,39 @@ async def seed_data():
                 )
                 session.add(pd_entry)
 
+        # Seed memoria del agente (aprendizajes iniciales — da contexto al kernel)
+        memorias = [
+            dict(scope="MOD-02", clave="bias_temperatura",
+                 valor=json.dumps({"offset_c": 1.2}),
+                 nota="MOD-02 corre ~1.2°C más caliente que MOD-01 por ubicación. Compensar al evaluar."),
+            dict(scope="global", clave="intervencion_ventilacion",
+                 valor=json.dumps({"delta_pct": 15, "tiempo_resolucion_min": 22}),
+                 nota="Ventilación +15% históricamente baja temperatura ~1.5°C en ~22 min."),
+            dict(scope="global", clave="ratio_frass_larva",
+                 valor=json.dumps({"ratio": 3.46}),
+                 nota="Relación histórica frass:larva ≈ 3.46 en lotes completados."),
+        ]
+        for m in memorias:
+            session.add(AgentMemory(**m, timestamp=now - timedelta(days=1)))
+
+        # Seed un par de decisiones del agente (para que el feed no arranque vacío)
+        decisiones = [
+            dict(lote_codigo="BSF-2026-06B", modulo="MOD-02", role="proceso",
+                 severidad=AlertSeverity.WARNING, titulo="Temperatura sobre óptimo en MOD-02",
+                 percepcion=json.dumps({"temperatura": 32.8, "tendencia": "+0.3°C/30min", "umbral": 32.0}),
+                 razonamiento="Temperatura 0.8°C sobre el óptimo con tendencia al alza. Memoria: MOD-02 corre +1.2°C; ventilación +15% resuelve en ~22min. Severidad warning → dentro del nivel de autonomía actual.",
+                 accion_propuesta="alta_temperatura", outcome=DecisionOutcome.AUTO_EXECUTED,
+                 confianza=0.82, modelo="deterministico"),
+            dict(lote_codigo="BSF-2026-05C", modulo="MOD-03", role="operaciones",
+                 severidad=AlertSeverity.INFO, titulo="Ciclo de 14 días completo",
+                 percepcion=json.dumps({"dia_actual": 14, "dias_ciclo": 14}),
+                 razonamiento="Lote alcanzó el día 14. Protocolo de cosecha aplica. Acción informativa, no requiere intervención crítica.",
+                 accion_propuesta="ciclo_completo", outcome=DecisionOutcome.AUTO_EXECUTED,
+                 confianza=0.95, modelo="deterministico"),
+        ]
+        for i, dec in enumerate(decisiones):
+            session.add(AgentDecision(**dec, timestamp=now - timedelta(minutes=18 - i*5),
+                                      cycle_id="seed"))
+
         await session.commit()
-        print("[DB] Seed completo.")
+        print(f"[DB] Seed completo. Backend={DB_BACKEND}")
