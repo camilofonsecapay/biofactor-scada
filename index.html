@@ -1,0 +1,1382 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>BioFactor SCADA – Urbaser</title>
+<style>
+/* ── RESET & BASE ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --c-bg:        #f4f5f7;
+  --c-surface:   #ffffff;
+  --c-border:    #dde1e7;
+  --c-text:      #1a2332;
+  --c-muted:     #6b7a90;
+  --c-primary:   #1a5276;
+  --c-primary-l: #d6e8f5;
+  --c-accent:    #117a65;
+  --c-warn:      #b7770d;
+  --c-warn-bg:   #fef9e7;
+  --c-danger:    #922b21;
+  --c-danger-bg: #fdedec;
+  --c-ok:        #1e8449;
+  --c-ok-bg:     #eafaf1;
+  --c-info:      #1a5276;
+  --c-info-bg:   #eaf4fb;
+  --radius:      6px;
+  --shadow:      0 1px 4px rgba(0,0,0,0.08);
+  --shadow-md:   0 2px 12px rgba(0,0,0,0.10);
+  --font:        'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-size: 14px;
+  min-height: 100vh;
+}
+
+/* ── LAYOUT ───────────────────────────────────────────────── */
+.app { display: flex; flex-direction: column; min-height: 100vh; }
+
+/* TOPBAR */
+.topbar {
+  background: var(--c-primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  height: 52px;
+  flex-shrink: 0;
+  position: sticky; top: 0; z-index: 200;
+}
+.topbar-left  { display: flex; align-items: center; gap: 16px; }
+.topbar-right { display: flex; align-items: center; gap: 12px; }
+.brand        { font-size: 16px; font-weight: 700; letter-spacing: 0.5px; }
+.brand span   { opacity: .55; font-weight: 400; }
+.divider-v    { width: 1px; height: 20px; background: rgba(255,255,255,.25); }
+.nav-tabs      { display: flex; gap: 2px; }
+.nav-tab {
+  padding: 6px 14px; border-radius: var(--radius);
+  font-size: 13px; color: rgba(255,255,255,.75);
+  cursor: pointer; border: none; background: none;
+  transition: background .15s, color .15s;
+}
+.nav-tab:hover    { background: rgba(255,255,255,.12); color: #fff; }
+.nav-tab.active   { background: rgba(255,255,255,.2); color: #fff; font-weight: 600; }
+.badge-live {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; color: rgba(255,255,255,.8);
+  background: rgba(255,255,255,.12);
+  border-radius: 20px; padding: 3px 10px;
+}
+.dot { width: 6px; height: 6px; border-radius: 50%; background: #4cd964;
+  animation: blink 1.8s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+.clock { font-size: 12px; color: rgba(255,255,255,.7); font-variant-numeric: tabular-nums; }
+
+/* SUBBAR (context info) */
+.subbar {
+  background: var(--c-surface);
+  border-bottom: 1px solid var(--c-border);
+  padding: 8px 24px;
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px;
+}
+.subbar-left  { display: flex; align-items: center; gap: 16px; }
+.subbar-right { display: flex; align-items: center; gap: 8px; }
+.page-title   { font-size: 15px; font-weight: 600; color: var(--c-text); }
+.tag {
+  font-size: 11px; padding: 2px 8px;
+  border-radius: 20px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.tag-ok      { background: var(--c-ok-bg);     color: var(--c-ok); }
+.tag-warn    { background: var(--c-warn-bg);   color: var(--c-warn); }
+.tag-danger  { background: var(--c-danger-bg); color: var(--c-danger); }
+.tag-info    { background: var(--c-info-bg);   color: var(--c-info); }
+.tag-muted   { background: #f0f1f3;            color: var(--c-muted); }
+.btn {
+  padding: 6px 14px; border-radius: var(--radius); font-size: 13px;
+  font-weight: 600; cursor: pointer; border: none; display: inline-flex;
+  align-items: center; gap: 6px; transition: opacity .15s;
+}
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn:hover:not(:disabled) { opacity: .85; }
+.btn-primary { background: var(--c-primary); color: #fff; }
+.btn-ghost   { background: transparent; color: var(--c-primary); border: 1px solid var(--c-primary); }
+.btn-danger  { background: var(--c-danger); color: #fff; }
+.btn-sm      { padding: 4px 10px; font-size: 12px; }
+
+/* MAIN BODY */
+.body-area { flex: 1; overflow: auto; }
+
+/* PAGES */
+.page { display: none; }
+.page.active { display: block; }
+
+/* ── DASHBOARD PAGE ───────────────────────────────────────── */
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  padding: 20px 24px 0;
+}
+.kpi {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 4px;
+  box-shadow: var(--shadow);
+}
+.kpi-label { font-size: 11px; color: var(--c-muted); text-transform: uppercase; letter-spacing: .8px; }
+.kpi-value { font-size: 28px; font-weight: 700; line-height: 1.1; }
+.kpi-sub   { font-size: 12px; color: var(--c-muted); }
+.kpi-green  .kpi-value { color: var(--c-ok); }
+.kpi-blue   .kpi-value { color: var(--c-primary); }
+.kpi-warn   .kpi-value { color: var(--c-warn); }
+.kpi-danger .kpi-value { color: var(--c-danger); }
+
+/* PIPELINE */
+.pipeline-section {
+  margin: 20px 24px 0;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.section-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--c-border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.section-title { font-size: 13px; font-weight: 600; color: var(--c-text); }
+.section-meta  { font-size: 11px; color: var(--c-muted); }
+.pipeline {
+  display: flex; align-items: stretch;
+  padding: 16px 18px; gap: 0;
+  overflow-x: auto;
+}
+.stage {
+  flex: 0 0 110px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 12px 10px;
+  text-align: center;
+  background: var(--c-bg);
+  position: relative;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.stage:hover      { border-color: var(--c-primary); background: var(--c-primary-l); }
+.stage.scada      { border-top: 3px solid var(--c-ok); }
+.stage.active     { border-color: var(--c-primary); background: var(--c-primary-l); }
+.stage.has-warn   { border-top: 3px solid var(--c-warn) !important; }
+.stage-badge-top {
+  position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+  font-size: 8px; font-weight: 800; padding: 1px 5px; border-radius: 3px;
+  text-transform: uppercase; letter-spacing: .5px; white-space: nowrap;
+}
+.badge-scada { background: var(--c-ok); color: #fff; }
+.stage-num   { font-size: 18px; font-weight: 800; color: var(--c-primary); opacity: .35; }
+.stage-icon  { font-size: 18px; margin: 4px 0; }
+.stage-name  { font-size: 11px; font-weight: 700; color: var(--c-text); }
+.stage-sub   { font-size: 9px; color: var(--c-muted); margin-top: 2px; line-height: 1.3; }
+.stage-status {
+  margin-top: 6px; font-size: 10px; font-weight: 700;
+  padding: 2px 6px; border-radius: 4px; display: inline-block;
+}
+.ss-ok     { background: var(--c-ok-bg);     color: var(--c-ok); }
+.ss-warn   { background: var(--c-warn-bg);   color: var(--c-warn); }
+.ss-idle   { background: #f0f1f3;            color: var(--c-muted); }
+.ss-cosecha{ background: var(--c-info-bg);   color: var(--c-info); }
+.p-arrow   { flex: 0 0 32px; display: flex; align-items: center; justify-content: center;
+  color: var(--c-border); font-size: 16px; }
+
+/* SENSOR + LOTES GRID */
+.content-row {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 16px;
+  padding: 16px 24px;
+}
+
+/* SENSOR CARDS */
+.sensors-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sensor-card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow);
+  border-left: 3px solid var(--c-border);
+}
+.sc-temp   { border-left-color: #c0392b; }
+.sc-hum    { border-left-color: #2980b9; }
+.sc-cycle  { border-left-color: var(--c-ok); }
+.sc-air    { border-left-color: #8e44ad; }
+.sc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.sc-name   { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--c-muted); font-weight: 600; }
+.sc-val    { font-size: 32px; font-weight: 700; line-height: 1; }
+.sc-unit   { font-size: 14px; color: var(--c-muted); font-weight: 400; }
+.sc-bar-bg { height: 4px; background: var(--c-border); border-radius: 2px; margin: 10px 0 6px; overflow: hidden; }
+.sc-bar    { height: 100%; border-radius: 2px; transition: width .8s ease; }
+.bar-temp  { background: #c0392b; }
+.bar-hum   { background: #2980b9; }
+.bar-cycle { background: var(--c-ok); }
+.bar-air   { background: #8e44ad; }
+.sc-meta   { font-size: 10px; color: var(--c-muted); display: flex; justify-content: space-between; }
+.sc-status { font-size: 11px; font-weight: 600; margin-top: 5px; }
+
+/* LOTES TABLE */
+.lotes-panel {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: flex; flex-direction: column;
+}
+.table-wrap { overflow: auto; flex: 1; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th {
+  text-align: left; padding: 8px 12px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: .7px;
+  color: var(--c-muted); font-weight: 700;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-bg);
+  position: sticky; top: 0; z-index: 1;
+}
+td { padding: 9px 12px; border-bottom: 1px solid var(--c-border); vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #f8f9fb; }
+.lote-code { font-weight: 700; font-family: monospace; font-size: 12px; color: var(--c-primary); }
+
+/* RIGHT SIDEBAR (alerts + workflows) */
+.right-stack { display: flex; flex-direction: column; gap: 12px; }
+.alerts-panel, .wf-panel {
+  background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.alert-item {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--c-border);
+  font-size: 12px; line-height: 1.5;
+  display: flex; gap: 8px; align-items: flex-start;
+}
+.alert-item:last-child { border-bottom: none; }
+.alert-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+.alert-msg  { flex: 1; }
+.alert-sub  { font-size: 10px; color: var(--c-muted); margin-top: 2px; }
+.wf-item {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--c-border);
+  font-size: 12px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.wf-item:last-child { border-bottom: none; }
+.wf-name  { font-size: 12px; font-weight: 600; }
+.wf-meta  { font-size: 10px; color: var(--c-muted); }
+
+/* ── AGENT PAGE ───────────────────────────────────────────── */
+.agent-layout {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 16px;
+  padding: 20px 24px;
+}
+.agent-main, .agent-side { display: flex; flex-direction: column; gap: 12px; }
+
+.chat-box {
+  background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  display: flex; flex-direction: column; height: 480px;
+}
+.chat-header { padding: 12px 16px; border-bottom: 1px solid var(--c-border); display: flex; align-items: center; gap: 10px; }
+.agent-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--c-primary); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; flex-shrink: 0;
+}
+.chat-messages { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.msg {
+  max-width: 85%; padding: 9px 12px; border-radius: 8px;
+  font-size: 13px; line-height: 1.5;
+}
+.msg-agent { background: var(--c-primary-l); color: var(--c-text); align-self: flex-start; border: 1px solid #c5dff0; }
+.msg-user  { background: var(--c-primary); color: #fff; align-self: flex-end; }
+.msg-pre   { background: #f4f5f7; border: 1px solid var(--c-border); border-radius: 6px;
+  padding: 10px; font-family: 'Consolas', monospace; font-size: 11px; overflow-x: auto;
+  white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; }
+.msg-time  { font-size: 10px; opacity: .6; margin-top: 3px; text-align: right; }
+.chat-input-area { padding: 10px 14px; border-top: 1px solid var(--c-border); display: flex; gap: 8px; }
+.chat-input {
+  flex: 1; padding: 8px 12px;
+  border: 1px solid var(--c-border); border-radius: var(--radius);
+  font-size: 13px; font-family: var(--font); outline: none;
+  transition: border-color .15s;
+}
+.chat-input:focus { border-color: var(--c-primary); }
+
+.wf-grid { display: flex; flex-direction: column; gap: 6px; }
+.wf-card {
+  background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: var(--radius); padding: 12px 14px;
+  display: flex; align-items: flex-start; gap: 10px; cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
+}
+.wf-card:hover { border-color: var(--c-primary); box-shadow: var(--shadow-md); }
+.wf-card-icon { font-size: 18px; flex-shrink: 0; }
+.wf-card-name  { font-size: 13px; font-weight: 600; }
+.wf-card-trigger { font-size: 11px; color: var(--c-muted); margin-top: 2px; }
+.wf-card-steps {
+  margin-top: 6px; display: none; /* shown on expand */
+  font-size: 11px; color: var(--c-muted);
+}
+.wf-card.expanded .wf-card-steps { display: block; }
+.wf-step { display: flex; gap: 6px; margin-top: 3px; }
+.wf-step::before { content: '→'; color: var(--c-primary); flex-shrink: 0; }
+
+/* ── DATA PAGE ────────────────────────────────────────────── */
+.data-layout { padding: 20px 24px; }
+.data-controls {
+  background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: var(--radius); padding: 14px 18px; margin-bottom: 16px;
+  display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;
+}
+.form-group { display: flex; flex-direction: column; gap: 4px; }
+.form-label { font-size: 11px; color: var(--c-muted); font-weight: 600; text-transform: uppercase; }
+.form-select, .form-input {
+  padding: 6px 10px; border: 1px solid var(--c-border); border-radius: var(--radius);
+  font-size: 13px; font-family: var(--font); background: var(--c-bg);
+  outline: none; transition: border-color .15s; min-width: 140px;
+}
+.form-select:focus, .form-input:focus { border-color: var(--c-primary); }
+.data-results {
+  background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.results-meta {
+  padding: 10px 16px; border-bottom: 1px solid var(--c-border);
+  display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--c-muted);
+}
+.results-meta strong { color: var(--c-text); }
+pre#data-output {
+  padding: 14px 16px; overflow: auto; max-height: 500px;
+  font-family: 'Consolas','Courier New', monospace; font-size: 12px;
+  line-height: 1.6; color: var(--c-text); white-space: pre-wrap;
+}
+
+/* ── LOTES PAGE ───────────────────────────────────────────── */
+.lotes-layout { padding: 20px 24px; }
+.lotes-toolbar {
+  display: flex; gap: 8px; margin-bottom: 14px;
+  align-items: center; justify-content: space-between;
+}
+.lotes-table-wrap {
+  background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+}
+.detail-panel {
+  margin-top: 14px;
+  background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow);
+  display: none;
+}
+.detail-panel.visible { display: block; }
+.detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; }
+.detail-item { }
+.detail-label { font-size: 11px; color: var(--c-muted); text-transform: uppercase; margin-bottom: 2px; }
+.detail-value { font-size: 15px; font-weight: 600; }
+
+/* ── NEW LOTE MODAL ───────────────────────────────────────── */
+.modal-bg {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4); z-index: 500;
+  align-items: center; justify-content: center;
+}
+.modal-bg.open { display: flex; }
+.modal {
+  background: var(--c-surface); border-radius: 8px;
+  padding: 24px; width: 400px; max-width: 95vw;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.modal h3 { font-size: 16px; margin-bottom: 16px; }
+.modal .form-group { margin-bottom: 12px; }
+.modal .form-input { width: 100%; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+
+/* ── UTILS ────────────────────────────────────────────────── */
+.loading { opacity: .5; font-style: italic; }
+.empty   { color: var(--c-muted); font-style: italic; font-size: 13px; padding: 16px; }
+.error   { color: var(--c-danger); font-size: 13px; }
+.spin    { animation: spin .8s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.text-right { text-align: right; }
+.mt-4  { margin-top: 4px; }
+.mt-8  { margin-top: 8px; }
+.flex  { display: flex; }
+.gap-8 { gap: 8px; }
+.ai-spinner {
+  display: none; padding: 10px 16px; font-size: 12px; color: var(--c-muted);
+  font-style: italic;
+}
+
+/* RESPONSIVE */
+@media (max-width: 1100px) {
+  .content-row       { grid-template-columns: 1fr; }
+  .agent-layout      { grid-template-columns: 1fr; }
+  .dash-grid         { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 700px) {
+  .dash-grid         { grid-template-columns: 1fr 1fr; }
+  .sensors-grid      { grid-template-columns: 1fr; }
+  .topbar            { padding: 0 12px; }
+  .nav-tab           { padding: 5px 8px; font-size: 12px; }
+  .detail-grid       { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ── TOPBAR ─────────────────────────────────────────────── -->
+<header class="topbar">
+  <div class="topbar-left">
+    <div class="brand">BioFactor <span>/ SCADA</span></div>
+    <div class="divider-v"></div>
+    <nav class="nav-tabs">
+      <button class="nav-tab active" onclick="showPage('dashboard')">Dashboard</button>
+      <button class="nav-tab" onclick="showPage('lotes')">Lotes</button>
+      <button class="nav-tab" onclick="showPage('data')">Datos</button>
+      <button class="nav-tab" onclick="showPage('agent')">Agente IA</button>
+    </nav>
+  </div>
+  <div class="topbar-right">
+    <div class="badge-live"><div class="dot"></div> En vivo</div>
+    <div class="divider-v"></div>
+    <span class="clock" id="clock">--:--:--</span>
+  </div>
+</header>
+
+<!-- ── SUBBAR ─────────────────────────────────────────────── -->
+<div class="subbar">
+  <div class="subbar-left">
+    <span class="page-title" id="page-title">Dashboard · Monitoreo en tiempo real</span>
+    <span class="tag tag-ok" id="lotes-activos-tag">● 2 lotes activos</span>
+    <span class="tag tag-warn" id="alertas-tag">⚠ 2 alertas</span>
+  </div>
+  <div class="subbar-right">
+    <button class="btn btn-ghost btn-sm" onclick="refreshAll()">↻ Actualizar</button>
+    <button class="btn btn-primary btn-sm" onclick="openModal()">+ Nuevo lote</button>
+  </div>
+</div>
+
+<!-- ── BODY ───────────────────────────────────────────────── -->
+<div class="body-area">
+
+  <!-- ═══ DASHBOARD ═══════════════════════════════════════════ -->
+  <div id="page-dashboard" class="page active">
+
+    <!-- KPIs -->
+    <div class="dash-grid" id="kpi-grid">
+      <div class="kpi kpi-green">
+        <span class="kpi-label">Producción activa</span>
+        <span class="kpi-value" id="k-prod">—</span>
+        <span class="kpi-sub">toneladas en proceso</span>
+      </div>
+      <div class="kpi kpi-blue">
+        <span class="kpi-label">Larva BSF real</span>
+        <span class="kpi-value" id="k-larva">—</span>
+        <span class="kpi-sub">kg acumulados</span>
+      </div>
+      <div class="kpi kpi-warn">
+        <span class="kpi-label">Alertas activas</span>
+        <span class="kpi-value" id="k-alertas">—</span>
+        <span class="kpi-sub" id="k-alertas-sub">sin alertas</span>
+      </div>
+      <div class="kpi kpi-green">
+        <span class="kpi-label">Rendimiento prom.</span>
+        <span class="kpi-value" id="k-rend">—</span>
+        <span class="kpi-sub">vs objetivo</span>
+      </div>
+    </div>
+
+    <!-- PIPELINE -->
+    <div class="pipeline-section">
+      <div class="section-header">
+        <span class="section-title">Flujo del proceso – 7 etapas</span>
+        <span class="section-meta">Verde = monitoreado por SCADA</span>
+      </div>
+      <div class="pipeline">
+        <div class="stage" onclick="selectStage(0)">
+          <div class="stage-num">00</div>
+          <div class="stage-icon">🚛</div>
+          <div class="stage-name">Recolección</div>
+          <div class="stage-sub">Residuos plazas</div>
+          <div class="stage-status ss-ok">OK</div>
+        </div>
+        <div class="p-arrow">›</div>
+        <div class="stage" onclick="selectStage(1)">
+          <div class="stage-num">01</div>
+          <div class="stage-icon">⚖️</div>
+          <div class="stage-name">Recepción</div>
+          <div class="stage-sub">Pesaje · Gate fee</div>
+          <div class="stage-status ss-ok">OK</div>
+        </div>
+        <div class="p-arrow">›</div>
+        <div class="stage scada active" id="stage-2" onclick="selectStage(2)">
+          <span class="stage-badge-top badge-scada">SCADA</span>
+          <div class="stage-num">02</div>
+          <div class="stage-icon">🥚</div>
+          <div class="stage-name">Reproducción</div>
+          <div class="stage-sub">Colonia BSF</div>
+          <div class="stage-status ss-ok">OK</div>
+        </div>
+        <div class="p-arrow">›</div>
+        <div class="stage scada has-warn" id="stage-3" onclick="selectStage(3)">
+          <span class="stage-badge-top badge-scada">SCADA</span>
+          <div class="stage-num">03</div>
+          <div class="stage-icon">🐛</div>
+          <div class="stage-name">Bioconversión</div>
+          <div class="stage-sub">14 días · larvas</div>
+          <div class="stage-status ss-warn">Atención</div>
+        </div>
+        <div class="p-arrow">›</div>
+        <div class="stage scada" id="stage-4" onclick="selectStage(4)">
+          <span class="stage-badge-top badge-scada">SCADA</span>
+          <div class="stage-num">04</div>
+          <div class="stage-icon">🔬</div>
+          <div class="stage-name">Cosecha</div>
+          <div class="stage-sub">Cribado larva</div>
+          <div class="stage-status ss-cosecha">En cosecha</div>
+        </div>
+        <div class="p-arrow">›</div>
+        <div class="stage scada" id="stage-5" onclick="selectStage(5)">
+          <span class="stage-badge-top badge-scada">SCADA</span>
+          <div class="stage-num">05</div>
+          <div class="stage-icon">⚙️</div>
+          <div class="stage-name">Procesamiento</div>
+          <div class="stage-sub">Harina · frass</div>
+          <div class="stage-status ss-idle">Espera</div>
+        </div>
+        <div class="p-arrow">›</div>
+        <div class="stage" onclick="selectStage(6)">
+          <div class="stage-num">06</div>
+          <div class="stage-icon">📦</div>
+          <div class="stage-name">Despacho</div>
+          <div class="stage-sub">Empaque · clientes</div>
+          <div class="stage-status ss-idle">Espera</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SENSORS + LOTES -->
+    <div class="content-row">
+      <!-- Sensor cards -->
+      <div>
+        <div class="section-header" style="padding:0 0 10px;">
+          <span class="section-title">Variables SCADA · Tiempo real</span>
+          <span class="section-meta" id="sensor-ts">Actualizando…</span>
+        </div>
+        <div class="sensors-grid" id="sensors-grid">
+          <div class="sensor-card sc-temp">
+            <div class="sc-header">
+              <span class="sc-name">🌡 Temperatura</span>
+              <span class="tag tag-ok" id="tag-temp">OK</span>
+            </div>
+            <span class="sc-val" id="s-temp" style="color:#c0392b">—</span>
+            <span class="sc-unit">°C</span>
+            <div class="sc-bar-bg"><div class="sc-bar bar-temp" id="bar-temp" style="width:0%"></div></div>
+            <div class="sc-meta"><span>20°C</span><span>Óptimo 28–32°C</span><span>40°C</span></div>
+            <div class="sc-status" id="st-temp">—</div>
+          </div>
+          <div class="sensor-card sc-hum">
+            <div class="sc-header">
+              <span class="sc-name">💧 Humedad sustrato</span>
+              <span class="tag tag-ok" id="tag-hum">OK</span>
+            </div>
+            <span class="sc-val" id="s-hum" style="color:#2980b9">—</span>
+            <span class="sc-unit">%</span>
+            <div class="sc-bar-bg"><div class="sc-bar bar-hum" id="bar-hum" style="width:0%"></div></div>
+            <div class="sc-meta"><span>0%</span><span>Óptimo 60–70%</span><span>100%</span></div>
+            <div class="sc-status" id="st-hum">—</div>
+          </div>
+          <div class="sensor-card sc-cycle">
+            <div class="sc-header">
+              <span class="sc-name">♻ Ciclo de producción</span>
+              <span class="tag tag-info" id="tag-cycle">—</span>
+            </div>
+            <span class="sc-val" id="s-cycle" style="color:var(--c-ok)">—</span>
+            <span class="sc-unit" id="s-cycle-unit">/14 días</span>
+            <div class="sc-bar-bg"><div class="sc-bar bar-cycle" id="bar-cycle" style="width:0%"></div></div>
+            <div class="sc-meta"><span>Día 1</span><span id="s-lote-code">—</span><span>Día 14</span></div>
+            <div class="sc-status" id="st-cycle">—</div>
+          </div>
+          <div class="sensor-card sc-air">
+            <div class="sc-header">
+              <span class="sc-name">🌬 Calidad aire NH₃</span>
+              <span class="tag tag-warn" id="tag-air">—</span>
+            </div>
+            <span class="sc-val" id="s-nh3" style="color:#8e44ad">—</span>
+            <span class="sc-unit">ppm</span>
+            <div class="sc-bar-bg"><div class="sc-bar bar-air" id="bar-nh3" style="width:0%"></div></div>
+            <div class="sc-meta"><span>0</span><span>Límite: 50 ppm</span><span>100</span></div>
+            <div class="sc-status" id="st-nh3">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: alerts + workflows -->
+      <div class="right-stack">
+        <div class="alerts-panel">
+          <div class="section-header">
+            <span class="section-title">Alertas activas</span>
+            <button class="btn btn-ghost btn-sm" onclick="loadAlerts()">Ver todas</button>
+          </div>
+          <div id="alerts-list"><div class="empty">Cargando…</div></div>
+        </div>
+        <div class="wf-panel">
+          <div class="section-header">
+            <span class="section-title">Últimas acciones IA</span>
+          </div>
+          <div id="wf-recent-list"><div class="empty">Cargando…</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lotes table -->
+    <div style="padding: 0 24px 24px;">
+      <div class="lotes-panel">
+        <div class="section-header">
+          <span class="section-title">Lotes en curso</span>
+          <span class="section-meta" id="lotes-count">—</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Código</th><th>Módulo</th><th>Etapa</th>
+                <th>Día ciclo</th><th>Larva real</th><th>Frass real</th>
+                <th>Rendimiento</th><th>Estado</th>
+              </tr>
+            </thead>
+            <tbody id="lotes-tbody"><tr><td colspan="8" class="empty">Cargando…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ LOTES PAGE ══════════════════════════════════════════ -->
+  <div id="page-lotes" class="page">
+    <div class="lotes-layout">
+      <div class="lotes-toolbar">
+        <span class="page-title">Gestión de Lotes</span>
+        <button class="btn btn-primary btn-sm" onclick="openModal()">+ Nuevo lote</button>
+      </div>
+      <div class="lotes-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Código</th><th>Módulo</th><th>Etapa</th><th>Día</th>
+              <th>Kg entrada</th><th>Larva proy.</th><th>Larva real</th>
+              <th>Frass real</th><th>Rendimiento</th><th>Estado</th><th>Acción</th>
+            </tr>
+          </thead>
+          <tbody id="lotes-full-tbody"><tr><td colspan="11" class="empty">Cargando…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="detail-panel" id="lote-detail">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <strong id="detail-title">—</strong>
+          <button class="btn btn-ghost btn-sm" onclick="closeDetail()">✕ Cerrar</button>
+        </div>
+        <div class="detail-grid" id="detail-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ DATA PAGE ════════════════════════════════════════════ -->
+  <div id="page-data" class="page">
+    <div class="data-layout">
+      <div class="data-controls">
+        <div class="form-group">
+          <label class="form-label">Tipo de consulta</label>
+          <select class="form-select" id="query-type" onchange="onQueryTypeChange()">
+            <optgroup label="Sensores">
+              <option value="lecturas_recientes">Últimas lecturas</option>
+              <option value="stats_modulo">Estadísticas por módulo</option>
+              <option value="temp_promedio">Temperatura promedio</option>
+              <option value="nh3_modulos">NH₃ por módulo</option>
+            </optgroup>
+            <optgroup label="Producción">
+              <option value="rendimiento_lotes">Rendimiento de lotes</option>
+              <option value="produccion_diaria">Producción diaria</option>
+            </optgroup>
+            <optgroup label="Operaciones">
+              <option value="alertas_activas">Alertas activas</option>
+              <option value="alertas_resueltas">Alertas resueltas</option>
+              <option value="workflow_history">Historial de workflows</option>
+            </optgroup>
+            <option value="custom">── Consulta libre (texto)</option>
+          </select>
+        </div>
+        <div class="form-group" id="hours-group">
+          <label class="form-label">Ventana temporal</label>
+          <select class="form-select" id="hours-filter">
+            <option value="1">Última hora</option>
+            <option value="6">Últimas 6h</option>
+            <option value="24" selected>Últimas 24h</option>
+            <option value="72">3 días</option>
+            <option value="168">7 días</option>
+          </select>
+        </div>
+        <div class="form-group" id="modulo-group">
+          <label class="form-label">Módulo</label>
+          <select class="form-select" id="modulo-filter">
+            <option value="">Todos</option>
+            <option value="MOD-01">MOD-01</option>
+            <option value="MOD-02">MOD-02</option>
+            <option value="MOD-03">MOD-03</option>
+          </select>
+        </div>
+        <div class="form-group" id="custom-group" style="display:none;flex:1;">
+          <label class="form-label">Consulta en lenguaje natural</label>
+          <input class="form-input" id="custom-query" placeholder="ej: temperatura promedio, alertas activas, rendimiento lotes…" style="width:100%;" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">&nbsp;</label>
+          <button class="btn btn-primary" id="run-query-btn" onclick="runDataQuery()">▶ Ejecutar</button>
+        </div>
+      </div>
+      <div class="data-results">
+        <div class="results-meta">
+          <span id="query-label">Selecciona una consulta y ejecuta</span>
+          <span style="margin-left:auto;" id="rows-count"></span>
+        </div>
+        <pre id="data-output" class="empty">Los resultados aparecerán aquí.</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ AGENT PAGE ═══════════════════════════════════════════ -->
+  <div id="page-agent" class="page">
+    <div class="agent-layout">
+      <div class="agent-main">
+        <!-- Chat -->
+        <div class="chat-box">
+          <div class="chat-header">
+            <div class="agent-avatar">IA</div>
+            <div>
+              <div style="font-size:13px;font-weight:600;">Agente SCADA · BioFactor</div>
+              <div style="font-size:11px;color:var(--c-muted);">Consulta datos, ejecuta workflows, analiza el proceso</div>
+            </div>
+            <div class="badge-live" style="margin-left:auto;"><div class="dot"></div> Activo</div>
+          </div>
+          <div class="chat-messages" id="chat-msgs">
+            <div class="msg msg-agent">
+              Hola. Soy el agente IA del sistema SCADA BioFactor.<br><br>
+              Puedes pedirme:<br>
+              • <b>Análisis en tiempo real</b> — "analiza los lotes activos"<br>
+              • <b>Queries de datos</b> — "temperatura promedio", "alertas activas"<br>
+              • <b>Ejecutar workflows</b> — "ejecuta análisis diario" o haz clic en un workflow<br>
+              • <b>Diagnóstico</b> — "¿qué pasa con MOD-02?"
+              <div class="msg-time">Sistema</div>
+            </div>
+          </div>
+          <div class="ai-spinner" id="ai-spinner">⏳ Procesando…</div>
+          <div class="chat-input-area">
+            <input class="chat-input" id="chat-input" placeholder="Escribe una consulta o acción…"
+              onkeydown="if(event.key==='Enter')sendChat()"/>
+            <button class="btn btn-primary" onclick="sendChat()">Enviar</button>
+          </div>
+        </div>
+
+        <!-- Workflow history table -->
+        <div style="background:var(--c-surface);border:1px solid var(--c-border);border-radius:var(--radius);box-shadow:var(--shadow);">
+          <div class="section-header">
+            <span class="section-title">Historial de workflows ejecutados</span>
+            <button class="btn btn-ghost btn-sm" onclick="loadWfHistory()">↻</button>
+          </div>
+          <div class="table-wrap" style="max-height:220px;">
+            <table>
+              <thead><tr><th>ID</th><th>Workflow</th><th>Lote</th><th>Estado</th><th>Disparado por</th><th>Duración</th><th>Fecha</th></tr></thead>
+              <tbody id="wf-history-tbody"><tr><td colspan="7" class="empty">Cargando…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Workflow cards -->
+      <div class="agent-side">
+        <div style="font-size:13px;font-weight:600;padding:4px 0 8px;">Workflows disponibles</div>
+        <div class="wf-grid" id="wf-cards"></div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /body-area -->
+</div><!-- /app -->
+
+<!-- ── MODAL: NUEVO LOTE ───────────────────────────────────── -->
+<div class="modal-bg" id="modal-bg">
+  <div class="modal">
+    <h3>Nuevo lote BSF</h3>
+    <div class="form-group">
+      <label class="form-label">Código del lote</label>
+      <input class="form-input" id="m-codigo" placeholder="BSF-2026-07A" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Kg de entrada</label>
+      <input class="form-input" type="number" id="m-kg" value="1000" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Módulo</label>
+      <select class="form-select" id="m-modulo" style="width:100%;">
+        <option>MOD-01</option><option>MOD-02</option>
+        <option>MOD-03</option><option>MOD-04</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notas</label>
+      <input class="form-input" id="m-notas" placeholder="Observaciones iniciales…" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="createLote()">Crear lote</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── JAVASCRIPT ──────────────────────────────────────────── -->
+<script>
+const API = '';  // same origin
+
+// ── CLOCK ──────────────────────────────────────────────────
+function tick() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+tick(); setInterval(tick, 1000);
+
+// ── PAGE NAVIGATION ────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  event.currentTarget.classList.add('active');
+  const titles = {
+    dashboard: 'Dashboard · Monitoreo en tiempo real',
+    lotes:     'Lotes · Gestión de producción',
+    data:      'Datos · Queries y análisis',
+    agent:     'Agente IA · Workflows inteligentes'
+  };
+  document.getElementById('page-title').textContent = titles[name] || name;
+  if (name === 'lotes')     loadLotesFull();
+  if (name === 'agent')     { loadWfCards(); loadWfHistory(); }
+}
+
+// ── API HELPERS ────────────────────────────────────────────
+async function api(path, method='GET', body=null) {
+  const opts = { method, headers: {'Content-Type':'application/json'} };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+// ── DASHBOARD ──────────────────────────────────────────────
+let dashData = null;
+
+async function loadDashboard() {
+  try {
+    dashData = await api('/api/dashboard');
+
+    // KPIs
+    const lotes = dashData.lotes;
+    const activos = lotes.filter(l => ['activo','alerta'].includes(l.status));
+    const totalKgEntrada = activos.reduce((s,l) => s + l.kg_entrada, 0);
+    const totalLarva = lotes.reduce((s,l) => s + l.kg_larva_real, 0);
+    const avgRend = lotes.length ? (lotes.reduce((s,l)=>s+l.rendimiento_pct,0)/lotes.length).toFixed(1) : 0;
+
+    document.getElementById('k-prod').textContent = (totalKgEntrada/1000).toFixed(1) + ' t';
+    document.getElementById('k-larva').textContent = totalLarva.toFixed(0) + ' kg';
+    document.getElementById('k-alertas').textContent = dashData.active_alerts;
+    document.getElementById('k-alertas-sub').textContent = dashData.active_alerts > 0 ? 'requieren atención' : 'sin alertas';
+    document.getElementById('k-rend').textContent = avgRend + '%';
+
+    // Subbar tags
+    document.getElementById('lotes-activos-tag').textContent = '● ' + activos.length + ' lotes activos';
+    document.getElementById('alertas-tag').textContent = '⚠ ' + dashData.active_alerts + ' alertas';
+    document.getElementById('lotes-count').textContent = lotes.length + ' lotes';
+
+    // Sensor cards — use first active lote
+    const al = activos[0];
+    if (al && al.ultimo_lectura) {
+      const lr = al.ultimo_lectura;
+      updateSensorCard('temp', lr.temperatura, 20, 40, 28, 32, '°C');
+      updateSensorCard('hum',  lr.humedad,     0, 100, 60, 72, '%');
+      updateNH3Card(lr.nh3);
+
+      document.getElementById('s-cycle').textContent   = al.dia_actual;
+      document.getElementById('s-cycle-unit').textContent = '/' + al.dias_ciclo + ' días';
+      document.getElementById('bar-cycle').style.width = ((al.dia_actual / al.dias_ciclo) * 100) + '%';
+      document.getElementById('s-lote-code').textContent = al.codigo;
+      document.getElementById('tag-cycle').textContent = 'Día ' + al.dia_actual;
+      document.getElementById('st-cycle').textContent  = 'Trazabilidad lote a lote activa';
+      document.getElementById('st-cycle').style.color  = 'var(--c-ok)';
+
+      document.getElementById('sensor-ts').textContent = 'Actualizado: ' + new Date(lr.timestamp + 'Z').toLocaleTimeString('es-CO');
+    }
+
+    // Lotes table
+    renderLotesTable(lotes);
+
+    // Alerts
+    renderAlerts(dashData);
+
+    // Workflows
+    renderWfRecent(dashData.recent_workflows);
+
+  } catch(e) {
+    console.error('Dashboard error:', e);
+  }
+}
+
+function updateSensorCard(id, val, min, max, optMin, optMax, unit) {
+  const pct = ((val - min) / (max - min)) * 100;
+  const el = document.getElementById('s-' + id);
+  if (el) el.textContent = val.toFixed(id === 'hum' ? 0 : 1);
+  const bar = document.getElementById('bar-' + id);
+  if (bar) bar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+  const tag = document.getElementById('tag-' + id);
+  const st  = document.getElementById('st-' + id);
+  const inRange = val >= optMin && val <= optMax;
+  if (tag) { tag.textContent = inRange ? 'OK' : 'Atención'; tag.className = 'tag ' + (inRange ? 'tag-ok' : 'tag-warn'); }
+  if (st)  { st.textContent = inRange ? '✓ En rango óptimo' : `⚠ Fuera del rango óptimo (${optMin}–${optMax}${unit})`; st.style.color = inRange ? 'var(--c-ok)' : 'var(--c-warn)'; }
+}
+
+function updateNH3Card(val) {
+  document.getElementById('s-nh3').textContent = val.toFixed(1);
+  document.getElementById('bar-nh3').style.width = Math.min(100, (val / 100) * 100) + '%';
+  const ok = val < 40, crit = val >= 55;
+  const tag = document.getElementById('tag-air');
+  const st  = document.getElementById('st-nh3');
+  tag.textContent = ok ? 'OK' : (crit ? 'Crítico' : 'Atención');
+  tag.className = 'tag ' + (ok ? 'tag-ok' : (crit ? 'tag-danger' : 'tag-warn'));
+  st.textContent = ok ? '✓ Calidad de aire óptima' : (crit ? '🚨 NH₃ crítico — ventilar' : '⚠ NH₃ elevado — monitorear');
+  st.style.color = ok ? 'var(--c-ok)' : (crit ? 'var(--c-danger)' : 'var(--c-warn)');
+}
+
+function renderLotesTable(lotes) {
+  const statusLabel = { activo:'Activo', alerta:'Alerta', cosecha:'Cosecha', proceso:'Proceso', despachado:'Despachado' };
+  const statusTag   = { activo:'tag-ok', alerta:'tag-warn', cosecha:'tag-info', proceso:'tag-info', despachado:'tag-muted' };
+  const tbody = document.getElementById('lotes-tbody');
+  if (!lotes.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin lotes</td></tr>'; return; }
+  tbody.innerHTML = lotes.map(l => `
+    <tr>
+      <td><span class="lote-code">${l.codigo}</span></td>
+      <td>${l.modulo}</td>
+      <td>${l.etapa}</td>
+      <td>${l.dia_actual}/${l.dias_ciclo}</td>
+      <td>${l.kg_larva_real.toFixed(1)} kg</td>
+      <td>${l.kg_frass_real.toFixed(1)} kg</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div style="flex:1;background:var(--c-border);border-radius:2px;height:4px;min-width:60px;">
+            <div style="width:${Math.min(100,l.rendimiento_pct)}%;background:${l.rendimiento_pct>=90?'var(--c-ok)':l.rendimiento_pct>=75?'var(--c-warn)':'var(--c-danger)'};height:100%;border-radius:2px;transition:width .6s;"></div>
+          </div>
+          <span style="font-size:12px;font-weight:600;">${l.rendimiento_pct}%</span>
+        </div>
+      </td>
+      <td><span class="tag ${statusTag[l.status]||'tag-muted'}">${statusLabel[l.status]||l.status}</span></td>
+    </tr>
+  `).join('');
+}
+
+function renderAlerts(data) {
+  const list = document.getElementById('alerts-list');
+  if (!data.active_alerts) {
+    list.innerHTML = '<div class="alert-item"><span class="alert-icon">✓</span><div class="alert-msg" style="color:var(--c-ok);">Sin alertas activas</div></div>';
+    return;
+  }
+  // Show from recent_workflows as proxy (real alerts loaded separately)
+  loadAlerts();
+}
+
+async function loadAlerts() {
+  const list = document.getElementById('alerts-list');
+  try {
+    const alerts = await api('/api/alertas?resuelta=false&limit=5');
+    if (!alerts.length) {
+      list.innerHTML = '<div class="alert-item"><span>✓</span><div class="alert-msg" style="color:var(--c-ok);">Sin alertas activas</div></div>';
+      return;
+    }
+    const sev = {warning:'⚠️', critical:'🚨', info:'ℹ️'};
+    const cls = {warning:'var(--c-warn)', critical:'var(--c-danger)', info:'var(--c-info)'};
+    list.innerHTML = alerts.map(a => `
+      <div class="alert-item">
+        <span class="alert-icon">${sev[a.severidad]||'•'}</span>
+        <div class="alert-msg">
+          <span style="font-weight:600;color:${cls[a.severidad]};">${a.variable.toUpperCase()}</span>
+          ${a.lote ? ' · <span class="lote-code" style="font-size:11px;">' + a.lote + '</span>' : ''}
+          <div style="margin-top:2px;">${a.mensaje}</div>
+          <div class="alert-sub">${new Date(a.timestamp + 'Z').toLocaleTimeString('es-CO')}</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="resolveAlert(${a.id},this)" style="flex-shrink:0;">✓</button>
+      </div>
+    `).join('');
+  } catch(e) {
+    list.innerHTML = '<div class="empty error">Error cargando alertas</div>';
+  }
+}
+
+async function resolveAlert(id, btn) {
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    await api('/api/alertas/' + id, 'PATCH', { resuelta: true, accion_tomada: 'Resuelta manualmente desde SCADA' });
+    loadAlerts();
+    loadDashboard();
+  } catch(e) { btn.disabled = false; btn.textContent = '✓'; }
+}
+
+function renderWfRecent(wfs) {
+  const list = document.getElementById('wf-recent-list');
+  if (!wfs.length) { list.innerHTML = '<div class="empty">Sin workflows recientes</div>'; return; }
+  const stCls = { completed:'tag-ok', failed:'tag-danger', running:'tag-info', pending:'tag-muted' };
+  list.innerHTML = wfs.map(w => `
+    <div class="wf-item">
+      <div>
+        <div class="wf-name">${w.name}</div>
+        <div class="wf-meta">${w.lote} · ${new Date(w.ts + 'Z').toLocaleTimeString('es-CO')}</div>
+      </div>
+      <span class="tag ${stCls[w.status]||'tag-muted'}">${w.status}</span>
+    </div>
+  `).join('');
+}
+
+// ── LOTES FULL PAGE ────────────────────────────────────────
+async function loadLotesFull() {
+  try {
+    const lotes = await api('/api/lotes');
+    const statusLabel = { activo:'Activo', alerta:'Alerta', cosecha:'Cosecha', proceso:'Proceso', despachado:'Despachado' };
+    const statusTag   = { activo:'tag-ok', alerta:'tag-warn', cosecha:'tag-info', proceso:'tag-info', despachado:'tag-muted' };
+    const tbody = document.getElementById('lotes-full-tbody');
+    tbody.innerHTML = lotes.map(l => `
+      <tr>
+        <td><span class="lote-code">${l.codigo}</span></td>
+        <td>${l.modulo}</td>
+        <td>${l.etapa}</td>
+        <td>${l.dia_actual}</td>
+        <td>1000 kg</td>
+        <td>130 kg</td>
+        <td>${l.kg_larva_real.toFixed(1)} kg</td>
+        <td>${l.kg_frass_real.toFixed(0)} kg</td>
+        <td><span style="font-weight:600;color:${l.rendimiento_pct>=90?'var(--c-ok)':l.rendimiento_pct>=75?'var(--c-warn)':'var(--c-danger)'}">${l.rendimiento_pct}%</span></td>
+        <td><span class="tag ${statusTag[l.status]||'tag-muted'}">${statusLabel[l.status]||l.status}</span></td>
+        <td><button class="btn btn-ghost btn-sm" onclick="showLoteDetail(${l.id})">Ver</button></td>
+      </tr>
+    `).join('');
+  } catch(e) {
+    document.getElementById('lotes-full-tbody').innerHTML = '<tr><td colspan="11" class="empty error">Error cargando lotes</td></tr>';
+  }
+}
+
+async function showLoteDetail(id) {
+  const detail = document.getElementById('lote-detail');
+  const grid   = document.getElementById('detail-grid');
+  try {
+    const l = await api('/api/lotes/' + id);
+    document.getElementById('detail-title').textContent = l.codigo + ' — Detalle del lote';
+    grid.innerHTML = [
+      ['Código', l.codigo], ['Módulo', l.modulo], ['Estado', l.status],
+      ['Etapa actual', l.etapa], ['Día ciclo', l.dia_actual + '/' + l.dias_ciclo],
+      ['Inicio', new Date(l.fecha_inicio + 'Z').toLocaleDateString('es-CO')],
+      ['Kg entrada', l.kg_entrada + ' kg'], ['Larva proyectada', l.kg_larva_proy + ' kg'],
+      ['Larva real', l.kg_larva_real + ' kg'], ['Frass proyectado', l.kg_frass_proy + ' kg'],
+      ['Frass real', l.kg_frass_real + ' kg'],
+      ['Notas', l.notas || '—']
+    ].map(([lbl, val]) => `
+      <div class="detail-item">
+        <div class="detail-label">${lbl}</div>
+        <div class="detail-value">${val}</div>
+      </div>
+    `).join('');
+    detail.classList.add('visible');
+  } catch(e) {}
+}
+
+function closeDetail() { document.getElementById('lote-detail').classList.remove('visible'); }
+
+// ── DATA PAGE ──────────────────────────────────────────────
+function onQueryTypeChange() {
+  const t = document.getElementById('query-type').value;
+  document.getElementById('custom-group').style.display = t === 'custom' ? 'flex' : 'none';
+}
+
+async function runDataQuery() {
+  const btn = document.getElementById('run-query-btn');
+  const out  = document.getElementById('data-output');
+  const label = document.getElementById('query-label');
+  const type  = document.getElementById('query-type').value;
+  const hours = document.getElementById('hours-filter').value;
+  const modulo = document.getElementById('modulo-filter').value;
+
+  btn.disabled = true; btn.textContent = '⏳ Ejecutando…';
+  out.textContent = 'Cargando…'; out.className = 'loading';
+
+  try {
+    let data, queryName;
+
+    if (type === 'custom') {
+      const q = document.getElementById('custom-query').value.trim();
+      if (!q) { out.textContent = 'Escribe una consulta primero.'; out.className='empty'; return; }
+      const r = await api('/api/agent/query', 'POST', { query: q });
+      queryName = r.query;
+      data = r.data || r.error;
+      if (r.sql) {
+        out.className = '';
+        document.getElementById('rows-count').textContent = Array.isArray(data) ? data.length + ' filas' : '';
+        out.textContent = '-- SQL generado\n' + r.sql + '\n\n-- Resultado\n' + JSON.stringify(data, null, 2);
+        label.textContent = queryName;
+        return;
+      }
+    } else if (type === 'lecturas_recientes') {
+      data = await api(`/api/lecturas?limit=50&hours=${hours}${modulo?'&modulo='+modulo:''}`);
+      queryName = 'Últimas lecturas de sensores';
+    } else if (type === 'stats_modulo') {
+      data = await api(`/api/lecturas/stats?hours=${hours}${modulo?'&modulo='+modulo:''}`);
+      queryName = 'Estadísticas por módulo';
+    } else if (type === 'temp_promedio') {
+      const r = await api('/api/agent/query', 'POST', { query: 'temperatura promedio' });
+      data = r.data; queryName = r.query;
+    } else if (type === 'nh3_modulos') {
+      const r = await api('/api/agent/query', 'POST', { query: 'nh3 módulos' });
+      data = r.data; queryName = r.query;
+    } else if (type === 'rendimiento_lotes') {
+      const r = await api('/api/agent/query', 'POST', { query: 'rendimiento producción' });
+      data = r.data; queryName = r.query;
+    } else if (type === 'produccion_diaria') {
+      data = await api('/api/produccion');
+      queryName = 'Producción diaria por lote';
+    } else if (type === 'alertas_activas') {
+      data = await api('/api/alertas?resuelta=false&limit=50');
+      queryName = 'Alertas activas';
+    } else if (type === 'alertas_resueltas') {
+      data = await api('/api/alertas?resuelta=true&limit=50');
+      queryName = 'Alertas resueltas';
+    } else if (type === 'workflow_history') {
+      data = await api('/api/workflows/history?limit=50');
+      queryName = 'Historial de workflows';
+    }
+
+    out.className = '';
+    document.getElementById('rows-count').textContent = Array.isArray(data) ? data.length + ' filas' : '';
+    label.textContent = queryName || type;
+    out.textContent = JSON.stringify(data, null, 2);
+  } catch(e) {
+    out.textContent = 'Error: ' + e.message;
+    out.className = 'error';
+  } finally {
+    btn.disabled = false; btn.textContent = '▶ Ejecutar';
+  }
+}
+
+// ── AGENT PAGE ─────────────────────────────────────────────
+async function loadWfCards() {
+  try {
+    const wfs = await api('/api/workflows/available');
+    const icons = { alta_temperatura:'🌡️', baja_humedad:'💧', nh3_elevado:'🌬️',
+                    ciclo_completo:'♻️', bajo_rendimiento:'📊', analisis_diario:'📋' };
+    document.getElementById('wf-cards').innerHTML = wfs.map(w => `
+      <div class="wf-card" onclick="toggleWfCard(this)" data-key="${w.key}">
+        <div class="wf-card-icon">${icons[w.key]||'⚙️'}</div>
+        <div style="flex:1;">
+          <div class="wf-card-name">${w.name}</div>
+          <div class="wf-card-trigger">Trigger: ${w.trigger}</div>
+          <div class="wf-card-steps">
+            ${w.steps.map(s => '<div class="wf-step">' + s + '</div>').join('')}
+          </div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();executeWfFromCard('${w.key}',this)">▶</button>
+      </div>
+    `).join('');
+  } catch(e) {}
+}
+
+function toggleWfCard(el) { el.classList.toggle('expanded'); }
+
+async function executeWfFromCard(key, btn) {
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const lotes = await api('/api/lotes');
+    const target = lotes.find(l => l.status === 'activo' || l.status === 'alerta') || lotes[0];
+    const result = await api('/api/workflows/execute', 'POST', {
+      workflow_key: key, lote_codigo: target?.codigo || 'ALL', input_data: { triggered_by: 'usuario_scada' }
+    });
+    addChatMsg('agent', `Workflow ejecutado: <b>${result.workflow}</b><br>Estado: ${result.status}<br>Resultado: <code>${JSON.stringify(result.result, null, 2)}</code>`);
+    loadWfHistory();
+    showPage_agent();
+  } catch(e) {
+    addChatMsg('agent', 'Error ejecutando workflow: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '▶';
+  }
+}
+
+function showPage_agent() {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-agent').classList.add('active');
+  document.querySelectorAll('.nav-tab')[3].classList.add('active');
+}
+
+async function loadWfHistory() {
+  try {
+    const wfs = await api('/api/workflows/history?limit=20');
+    const stCls = { completed:'tag-ok', failed:'tag-danger', running:'tag-info', pending:'tag-muted' };
+    const tbody = document.getElementById('wf-history-tbody');
+    if (!wfs.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">Sin historial</td></tr>'; return; }
+    tbody.innerHTML = wfs.map(w => `
+      <tr>
+        <td>${w.id}</td>
+        <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${w.workflow}">${w.workflow}</td>
+        <td><span class="lote-code" style="font-size:11px;">${w.lote}</span></td>
+        <td><span class="tag ${stCls[w.status]||'tag-muted'}">${w.status}</span></td>
+        <td>${w.triggered_by}</td>
+        <td>${w.duration_ms}ms</td>
+        <td>${new Date(w.timestamp + 'Z').toLocaleString('es-CO', {hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'})}</td>
+      </tr>
+    `).join('');
+  } catch(e) {}
+}
+
+// ── CHAT ───────────────────────────────────────────────────
+function addChatMsg(who, html) {
+  const box = document.getElementById('chat-msgs');
+  const div = document.createElement('div');
+  div.className = 'msg msg-' + who;
+  div.innerHTML = who === 'agent' ? html : html.replace(/</g,'&lt;');
+  if (who === 'agent') {
+    const t = document.createElement('div');
+    t.className = 'msg-time';
+    t.textContent = new Date().toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit'});
+    div.appendChild(t);
+  }
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function sendChat() {
+  const inp = document.getElementById('chat-input');
+  const txt = inp.value.trim();
+  if (!txt) return;
+  inp.value = '';
+  addChatMsg('user', txt);
+
+  const spinner = document.getElementById('ai-spinner');
+  spinner.style.display = 'block';
+
+  try {
+    const q = txt.toLowerCase();
+
+    // Route to appropriate API
+    if (q.includes('analiz') || q.includes('lote') || q.includes('mod-')) {
+      const r = await api('/api/agent/analyze', 'POST');
+      const findings = r.findings;
+      if (!findings.length) {
+        addChatMsg('agent', 'No encontré lotes activos para analizar.');
+      } else {
+        for (const f of findings) {
+          let msg = `<b>Lote ${f.lote}</b> · ${f.modulo} · Día ${f.dia_ciclo}/14<br>`;
+          if (f.reading) {
+            msg += `Temp: ${f.reading.temperatura}°C · Humedad: ${f.reading.humedad}% · NH₃: ${f.reading.nh3} ppm<br>`;
+          }
+          if (f.issues.length) {
+            msg += '<b>Issues:</b><br>' + f.issues.map(i => '• ' + i).join('<br>');
+          } else {
+            msg += '✓ Sin issues detectados.';
+          }
+          if (f.suggested_workflows.length) {
+            msg += '<br><b>Workflows sugeridos:</b> ' + f.suggested_workflows.join(', ');
+          }
+          addChatMsg('agent', msg);
+        }
+      }
+    } else if (q.includes('ejecuta') || q.includes('workflow') || q.includes('diario')) {
+      const key = q.includes('diario') ? 'analisis_diario'
+               : q.includes('temperatura') ? 'alta_temperatura'
+               : q.includes('humedad') ? 'baja_humedad'
+               : q.includes('nh3') || q.includes('amoniaco') ? 'nh3_elevado'
+               : 'analisis_diario';
+      const lotes = await api('/api/lotes');
+      const target = lotes.find(l=>['activo','alerta'].includes(l.status)) || lotes[0];
+      const r = await api('/api/workflows/execute', 'POST', {
+        workflow_key: key, lote_codigo: target?.codigo || 'ALL',
+        input_data: { triggered_by: 'chat_usuario' }
+      });
+      addChatMsg('agent', `Workflow <b>${r.workflow}</b> ejecutado.<br>Estado: <b>${r.status}</b><br><pre style="margin-top:6px;background:#f4f5f7;padding:8px;border-radius:4px;font-size:11px;">${JSON.stringify(r.result, null, 2)}</pre>`);
+      loadWfHistory();
+    } else {
+      // Natural language query
+      const r = await api('/api/agent/query', 'POST', { query: txt });
+      if (r.error) {
+        addChatMsg('agent', '⚠ ' + r.error);
+      } else {
+        let html = `<b>${r.query}</b>`;
+        if (r.sql) html += `<br><code style="font-size:10px;color:var(--c-muted);">${r.sql}</code>`;
+        html += `<pre class="msg-pre">${JSON.stringify(r.data, null, 2)}</pre>`;
+        addChatMsg('agent', html);
+      }
+    }
+  } catch(e) {
+    addChatMsg('agent', '❌ Error: ' + e.message);
+  } finally {
+    spinner.style.display = 'none';
+  }
+}
+
+// ── STAGE SELECT ───────────────────────────────────────────
+function selectStage(idx) {
+  document.querySelectorAll('.stage').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.stage')[idx].classList.add('active');
+}
+
+// ── MODAL ──────────────────────────────────────────────────
+function openModal()  { document.getElementById('modal-bg').classList.add('open'); }
+function closeModal() { document.getElementById('modal-bg').classList.remove('open'); }
+
+async function createLote() {
+  const codigo = document.getElementById('m-codigo').value.trim();
+  const kg     = parseFloat(document.getElementById('m-kg').value);
+  const modulo = document.getElementById('m-modulo').value;
+  const notas  = document.getElementById('m-notas').value;
+  if (!codigo) { alert('Ingresa un código para el lote'); return; }
+  try {
+    await api('/api/lotes', 'POST', { codigo, kg_entrada: kg, modulo, notas });
+    closeModal();
+    loadDashboard();
+    if (document.getElementById('page-lotes').classList.contains('active')) loadLotesFull();
+  } catch(e) {
+    alert('Error al crear lote: ' + e.message);
+  }
+}
+
+// ── REFRESH ────────────────────────────────────────────────
+async function refreshAll() {
+  await loadDashboard();
+  await loadAlerts();
+}
+
+// ── INIT ───────────────────────────────────────────────────
+loadDashboard();
+setInterval(loadDashboard, 15000);  // Auto-refresh every 15s
+</script>
+</body>
+</html>
